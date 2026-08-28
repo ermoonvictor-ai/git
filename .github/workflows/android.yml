@@ -77,11 +77,15 @@ jobs:
           files: jyoti-${{ steps.rel.outputs.tag }}.apk
           name: Jyoti ${{ steps.rel.outputs.tag }}
           body: |
-            Offline Vedic astrology and palm reading. Install the APK below.
+            Vedic astrology and palm reading. Install the APK below.
 
             It is debug-signed rather than Play-Store signed, so Android will
             ask you to allow "install unknown apps" for whichever app you open
             it with.
 
-            The app requests no INTERNET permission: nothing it holds — birth
-            details, palm photographs — can leave the device.
+            Charts, dasha, panchang and palm analysis all run on the device,
+            and the palm photograph never leaves it.
+
+            One feature is online and off by default: the Pandit chat, which
+            calls the Claude API with an API key you supply yourself. Until you
+            enable it in Settings the app makes no network calls at all.
