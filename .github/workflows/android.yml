@@ -81,11 +81,19 @@ jobs:
 
             It is debug-signed rather than Play-Store signed, so Android will
             ask you to allow "install unknown apps" for whichever app you open
-            it with.
+            it with. Built for arm64-v8a and armeabi-v7a — every shipping
+            phone, but not the x86 emulator.
 
-            Charts, dasha, panchang and palm analysis all run on the device,
-            and the palm photograph never leaves it.
+            Charts, dasha, panchang, transits and palm analysis all run on the
+            device, and the palm photograph never leaves it.
 
-            One feature is online and off by default: the Pandit chat, which
-            calls the Claude API with an API key you supply yourself. Until you
-            enable it in Settings the app makes no network calls at all.
+            The Pandit chat is opt-in and picks one of three providers:
+
+            - **On-device** — a model that runs inside the phone. No key, no
+              bill, no network. You install the model file once.
+            - **Gemini** (Google AI Studio) — has a free tier, so it costs
+              nothing to run. Needs a key you create yourself.
+            - **Claude** (Anthropic) — the best answers, pay-as-you-go.
+
+            With the on-device model, or with the chat off, the app makes no
+            network calls at all.
