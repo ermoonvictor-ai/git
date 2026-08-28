@@ -23,10 +23,20 @@ refuse on a plain `file://` page.
 codebase: Gradle mounts `app/` directly as the APK's assets, so the web app stays the
 single source of truth.
 
-**Download a built APK:** the *Build APK* GitHub Actions workflow runs on every push and
-can be started by hand from the **Actions** tab (*Build APK → Run workflow*). Open the
-finished run and download the `jyoti-apk-<sha>` artifact; unzip it to get `app-debug.apk`.
-Pushing a `v*` tag additionally attaches the APK to a GitHub Release.
+**Direct download:** every `v*` tag publishes a Release with the APK attached under a
+predictable, unauthenticated URL:
+
+```
+https://github.com/ermoonvictor-ai/git/releases/download/<tag>/jyoti-<tag>.apk
+```
+
+The [Releases page](https://github.com/ermoonvictor-ai/git/releases) always lists the
+latest one.
+
+**Per-commit builds:** the *Build APK* workflow also runs on every push and can be
+started by hand from the **Actions** tab (*Build APK → Run workflow*). Open the finished
+run and download the `jyoti-apk-<sha>` artifact — that one is a ZIP and needs a
+logged-in GitHub session.
 
 **Build it yourself** (needs the Android SDK and JDK 17):
 

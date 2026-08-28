@@ -6,10 +6,6 @@ on:
   push:
     branches: ["**"]
     tags: ["v*"]
-    paths:
-      - "app/**"
-      - "android/**"
-      - ".github/workflows/android.yml"
   workflow_dispatch:
 
 permissions:
@@ -45,8 +41,25 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      # A release asset is the only artifact with a stable, unauthenticated
+      # download URL, so give it a predictable filename:
+      #   .../releases/download/<tag>/jyoti-<tag>.apk
+      - name: Prepare release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "jyoti-${{ github.ref_name }}.apk"
+
       - name: Attach to release on a v* tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: jyoti-${{ github.ref_name }}.apk
+          name: Jyoti ${{ github.ref_name }}
+          body: |
+            Offline Vedic astrology and palm reading. Install the APK below.
+
+            It is debug-signed rather than Play-Store signed, so Android will
+            ask you to allow "install unknown apps" for whichever app you open
+            it with.
+
+            The app requests no INTERNET permission: nothing it holds — birth
+            details, palm photographs — can leave the device.
