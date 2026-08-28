@@ -71,6 +71,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
+          # Without this the tag is created on the default branch, so the
+          # release would point at code that did not build the attached APK.
+          target_commitish: ${{ github.sha }}
           files: jyoti-${{ steps.rel.outputs.tag }}.apk
           name: Jyoti ${{ steps.rel.outputs.tag }}
           body: |
