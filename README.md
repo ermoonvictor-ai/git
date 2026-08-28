@@ -5,10 +5,15 @@ panchang, transits, palm analysis — runs on your device, with no server of our
 in the picture. Your palm photograph never leaves the phone under any setting.
 
 One feature is online and off by default: **Pandit**, a chat that reasons about your own
-computed chart. It runs on either **Gemini** (Google AI Studio — has a genuinely free
-tier, so it costs nothing) or **Claude** (better answers, pay-as-you-go). Turn it on with
-your own key and your question plus a chart summary goes to that provider; leave it off
-and the app makes no network calls at all.
+computed chart. It runs on one of three providers:
+
+- **On-device** — a model that runs inside the phone. No key, no bill, no network. The
+  only genuinely unlimited option; answers are weaker and slower than the cloud ones.
+- **Gemini** (Google AI Studio) — has a real free tier, so it costs nothing to run.
+- **Claude** (Anthropic) — the best answers, pay-as-you-go.
+
+The cloud ones need your own key and are off until you supply it. With the on-device
+model, or with the chat off entirely, the app makes no network calls at all.
 
 ---
 
@@ -75,7 +80,7 @@ Two details in the shell are load-bearing:
 | **दशा** | Vimshottari maha/antar/pratyantar with dates, effects of the running period, upcoming changes, the whole 120-year cycle |
 | **हस्तरेखा** | Camera or gallery palm scan, measured line metrics with the detected lines drawn back over your photo, mount relief, classical interpretation |
 | **संगम** | Chart and hand cross-referenced — mind, heart, career, vitality, dominant mount |
-| **पंडित** | *(online, opt-in)* Streaming chat — Gemini or Claude — grounded in your computed chart |
+| **पंडित** | *(opt-in)* Streaming chat — on-device, Gemini or Claude — grounded in your computed chart |
 | **और** | Profile, method notes, plain-text report export, one-tap data wipe |
 
 ## Astronomy
@@ -131,7 +136,8 @@ today's panchang, tara bala and transits; and the measured palm metrics if a sca
 The system prompt tells the model to reason only from that data and to say so when
 something isn't in it, which is what keeps it from inventing placements.
 
-Two providers, both called directly from the device with the user's own key:
+Three providers. The cloud ones are called directly from the device with the user's own
+key — there is no server of ours in between:
 
 - **Gemini** (`@google/genai`) — the free option. Model IDs are **not** hardcoded: Google
   renames and retires them often, so the app asks the key itself which models it can reach
@@ -141,6 +147,19 @@ Two providers, both called directly from the device with the user's own key:
 - **Claude** (`@anthropic-ai/sdk`) — `claude-opus-5`, streaming, adaptive thinking at
   `medium` effort, server-side refusal fallbacks on, and the chart cached as a stable
   system prefix so follow-up turns are cheap.
+- **On-device** (Android only) — `LocalLlm.java` wraps MediaPipe's LLM Inference API
+  behind a `JyotiNative` JS bridge. The model file is not in the APK and no download URL
+  is hardcoded: you supply a link or pick a file already on the phone, it streams into
+  private storage, and a truncated transfer is discarded rather than left to fail at load
+  time. A small model cannot carry the full 5,000-token chart, so this path gets a
+  trimmed brief, a short-answer instruction, and only the last few turns of history.
+  Needs a MediaPipe/LiteRT `.task` or `.litertlm` file — the `litert-community`
+  collection on Hugging Face publishes them.
+
+  **Verification status, stated plainly:** the JS half is tested against a simulated
+  bridge (install by URL and by file, progress, streaming, prompt assembly), and the
+  native half compiles in CI. It has never run on a real device — this environment has
+  no Android hardware or emulator — so treat on-device generation as untested.
 
 Both SDKs are the official ones, vendored as one prebuilt browser bundle — see
 `app/js/vendor/README.md`; the app has no build step and must run from APK assets.
@@ -155,9 +174,9 @@ between, and any billing is on your own account. That does mean the key lives in
 for a single-user personal app that is the trade for having no backend at all. The
 settings tab turns it off and deletes the key.
 
-A key is unavoidable: no hosted model is free and unlimited, and embedding one in a
-public APK would hand it to everyone who downloads it. Gemini's free tier is the way to
-run this at zero cost.
+No *hosted* model is free and unlimited, and embedding a key in a public APK would hand
+it to everyone who downloads it. Gemini's free tier runs the cloud path at zero cost; the
+on-device model removes the key entirely.
 
 The Android manifest requests `INTERNET` for this feature. Before it existed the app had
 no such permission and the offline guarantee was enforced by the platform; now it is
@@ -175,12 +194,12 @@ app/
   js/palm-data.js         hast-rekha interpretation layer
   js/reading.js           report generation (natal, dasha, daily, palm, fusion)
   js/cities.js            201 offline places with lat/lon/tz
-  js/pandit.js            grounding context + Claude API calls (the online feature)
+  js/pandit.js            grounding context + provider dispatch (cloud and on-device)
   js/vendor/              prebuilt @anthropic-ai/sdk + @google/genai browser bundle
   js/app.js               UI
   sw.js                   offline cache
   manifest.webmanifest
-android/                  minimal WebView shell; mounts app/ as its assets
+android/                  WebView shell (mounts app/ as its assets) + on-device LLM bridge
 .github/workflows/        Build APK workflow
 ```
 
