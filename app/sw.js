@@ -1,11 +1,11 @@
 /* Offline-first cache. The app has no network dependencies at all;
    this simply makes it installable and usable with no connection. */
-var CACHE = 'jyoti-v2';
+var CACHE = 'jyoti-v3';
 var ASSETS = [
   './', './index.html', './css/style.css',
   './js/astro.js', './js/jyotish-data.js', './js/palm-data.js',
   './js/palm.js', './js/cities.js', './js/reading.js', './js/pandit.js',
-  './js/vendor/anthropic-sdk.js', './js/app.js',
+  './js/vendor/llm-sdks.js', './js/app.js',
   './manifest.webmanifest', './icons/icon.svg'
 ];
 
@@ -28,7 +28,7 @@ self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   // Never intercept the Claude API — it must always go to the network,
   // and a cached answer would be wrong as well as confusing.
-  if (e.request.url.indexOf('api.anthropic.com') >= 0) return;
+  if (/api\.anthropic\.com|generativelanguage\.googleapis\.com/.test(e.request.url)) return;
   e.respondWith(
     caches.match(e.request).then(function (hit) {
       return hit || fetch(e.request).then(function (res) {

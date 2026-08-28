@@ -15,14 +15,17 @@
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; }
 
   var state = { profile: null, chart: null, natal: null, palm: null, view: 'Today', stream: null,
-                ai: { key: '', enabled: false }, chat: [], busy: false };
+                ai: { provider: 'gemini', key: '', model: '', enabled: false },
+                chat: [], busy: false };
 
   /* ---------------- storage ---------------- */
   function load() {
     try { state.profile = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { state.profile = null; }
     try { state.palm = JSON.parse(localStorage.getItem(PALMKEY) || 'null'); } catch (e) { state.palm = null; }
-    try { state.ai = JSON.parse(localStorage.getItem(AIKEY) || 'null') || { key: '', enabled: false }; }
-    catch (e) { state.ai = { key: '', enabled: false }; }
+    try { state.ai = JSON.parse(localStorage.getItem(AIKEY) || 'null') ||
+                     { provider: 'gemini', key: '', model: '', enabled: false }; }
+    catch (e) { state.ai = { provider: 'gemini', key: '', model: '', enabled: false }; }
+    if (!state.ai.provider) state.ai.provider = 'claude';   // migrate pre-Gemini saves
     try { state.chat = JSON.parse(localStorage.getItem(CHATKEY) || '[]'); } catch (e) { state.chat = []; }
   }
 
@@ -638,35 +641,87 @@
   }
 
   function gateHTML() {
+    var P = window.Pandit.PROVIDERS;
     return '<div class="card"><h2><span class="ic">💬</span> पंडित जी — online सलाह</h2>' +
       '<p>बाक़ी पूरा app आपके फ़ोन के अंदर ही चलता है। यह एक feature अलग है — इसमें आपका सवाल और ' +
-      'आपकी कुंडली का सार Anthropic के Claude API को भेजा जाता है, तभी जवाब आता है।</p>' +
+      'आपकी कुंडली का सार AI को भेजा जाता है, तभी जवाब आता है।</p>' +
+
+      '<div class="field"><label>कौन सा AI</label><select id="aiProv">' +
+      Object.keys(P).map(function (k) {
+        return '<option value="' + k + '"' + (state.ai.provider === k ? ' selected' : '') + '>' +
+          esc(P[k].name) + (P[k].free ? ' — मुफ़्त tier' : ' — paid') + '</option>';
+      }).join('') + '</select></div>' +
+      '<p class="sub" id="provNote"></p>' +
+
       '<div class="note"><b>क्या-क्या भेजा जाता है:</b> आपका सवाल, और गणना की हुई कुंडली का सार — ' +
       'लग्न, ग्रह, भाव, योग, चल रही दशा, आज का गोचर, और अगर हस्तरेखा scan किया है तो उसके माप। ' +
       '<b>तस्वीर कभी नहीं भेजी जाती।</b> जन्म की तारीख़/समय/जगह context में शामिल है ताकि पंडित जी ' +
       'सही गणना पर बात कर सकें।</div>' +
       '<div class="warn">API key आपकी अपनी होगी और सिर्फ़ इसी फ़ोन के localStorage में रहेगी। ' +
-      'Request सीधे api.anthropic.com जाती है — बीच में हमारा कोई server नहीं। ' +
-      'बिल आपके अपने Anthropic account पर आएगा।</div>' +
-      '<div class="field"><label>Anthropic API key</label>' +
-      '<input id="aiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>' +
-      '<p class="sub">key यहाँ से बनती है: <b>console.anthropic.com → API keys</b></p>' +
+      'Request सीधे provider के पास जाती है — बीच में हमारा कोई server नहीं।</div>' +
+
+      '<div class="field"><label>API key</label>' +
+      '<input id="aiKey" type="password" placeholder="" autocomplete="off" spellcheck="false"></div>' +
+      '<p class="sub" id="keyWhere"></p>' +
+      '<div id="modelBox"></div>' +
       '<button class="btn" id="aiEnable">चालू करें</button>' +
       '<button class="btn ghost mt" id="aiSkip">रहने दें, offline ही ठीक है</button>' +
       '</div>';
   }
 
   function wireGate() {
+    var P = window.Pandit.PROVIDERS;
+    var sel = $('#aiProv'), key = $('#aiKey');
+
+    function refresh() {
+      var p = P[sel.value];
+      key.placeholder = p.keyHint;
+      $('#provNote').textContent = p.cost;
+      $('#keyWhere').innerHTML = 'key यहाँ से बनती है: <b>' + esc(p.console) + '</b>';
+      $('#modelBox').innerHTML = '';
+    }
+    sel.addEventListener('change', refresh);
+    refresh();
+
     $('#aiEnable').addEventListener('click', function () {
-      var k = $('#aiKey').value.trim();
+      var k = key.value.trim(), prov = sel.value, p = P[prov];
       if (!k) return alert('API key डालिए');
-      if (k.indexOf('sk-ant-') !== 0) {
-        if (!confirm('यह Anthropic key जैसी नहीं लग रही (sk-ant-… से शुरू होती है)। फिर भी आगे बढ़ें?')) return;
+      if (k.indexOf(p.keyPrefix) !== 0 &&
+          !confirm('यह ' + p.name + ' की key जैसी नहीं लग रही (' + p.keyHint + ' से शुरू होती है)। फिर भी आगे बढ़ें?')) return;
+
+      if (prov !== 'gemini') {
+        state.ai = { provider: prov, key: k, model: '', enabled: true };
+        saveAI(); badge(); renderPandit();
+        return;
       }
-      state.ai = { key: k, enabled: true };
-      saveAI(); badge(); renderPandit();
+      // Gemini: ask the key which models it can actually reach
+      var btn = this;
+      btn.disabled = true;
+      $('#modelBox').innerHTML = '<p class="sub"><span class="spinner"></span> model list लाई जा रही है…</p>';
+      window.Pandit.geminiModels(k).then(function (models) {
+        btn.disabled = false;
+        if (!models.length) {
+          $('#modelBox').innerHTML = '<div class="warn">इस key पर कोई chat model नहीं मिला।</div>';
+          return;
+        }
+        state.ai = { provider: 'gemini', key: k, model: models[0].id, enabled: true };
+        saveAI(); badge(); renderPandit();
+      }).catch(function (e) {
+        btn.disabled = false;
+        $('#modelBox').innerHTML = '<div class="warn">key जाँची नहीं जा सकी: ' + esc(geminiErr(e)) + '</div>';
+      });
     });
+
     $('#aiSkip').addEventListener('click', function () { show('Today'); });
+  }
+
+  function geminiErr(e) {
+    var m = (e && e.message) || String(e);
+    if (/API[_ ]?key not valid|API_KEY_INVALID|400/i.test(m)) return 'key स्वीकार नहीं हुई';
+    if (/PERMISSION_DENIED|403/i.test(m)) return 'इस key को अनुमति नहीं है';
+    if (/RESOURCE_EXHAUSTED|429/i.test(m)) return 'आज की मुफ़्त सीमा पूरी हो गई';
+    if (/fetch|network|Failed to fetch/i.test(m)) return 'इंटरनेट से जुड़ नहीं पाए';
+    return m;
   }
 
   function wireChat() {
@@ -729,6 +784,8 @@
 
     var acc = '';
     window.Pandit.ask({
+      provider: state.ai.provider,
+      model: state.ai.model,
       apiKey: state.ai.key,
       system: sys,
       messages: history,
@@ -760,6 +817,15 @@
   // Most-specific-first chain over the SDK's typed errors — a single broad
   // catch would blur retryable failures into permanent ones.
   function friendlyErr(e) {
+    if (state.ai.provider === 'gemini') {
+      var g = geminiErr(e);
+      if (g === 'आज की मुफ़्त सीमा पूरी हो गई')
+        return 'आज की मुफ़्त सीमा पूरी हो गई (429). कल फिर चलेगा, या "और" टैब से Claude पर चले जाइए।';
+      if (g === 'key स्वीकार नहीं हुई') return 'Gemini key स्वीकार नहीं हुई। "और" टैब से दोबारा डालिए।';
+      if (g === 'इंटरनेट से जुड़ नहीं पाए')
+        return 'इंटरनेट से जुड़ नहीं पाए। बाक़ी app offline चलता रहेगा — कुंडली, दशा और हस्तरेखा सब चलेंगे।';
+      return 'त्रुटि: ' + g;
+    }
     var A = window.Anthropic;
     if (A) {
       if (e instanceof A.AuthenticationError)
@@ -800,25 +866,37 @@
       '</div>';
 
     var aiOn = state.ai.enabled && state.ai.key;
+    var PV = window.Pandit.PROVIDERS;
+    var cur = PV[state.ai.provider] || PV.claude;
     h += '<div class="card"><h2><span class="ic">💬</span> पंडित जी (online)</h2>' +
       '<p class="sub">सिर्फ़ यही एक feature इंटरनेट इस्तेमाल करता है। ' +
       'अभी: <b style="color:' + (aiOn ? 'var(--bl)' : 'var(--gr)') + '">' +
       (aiOn ? 'चालू' : 'बंद') + '</b></p>' +
-      (aiOn ? '<div class="gridkv"><b>Key</b><span>' +
-        esc(state.ai.key.slice(0, 12)) + '…' + esc(state.ai.key.slice(-4)) + '</span>' +
-        '<b>Model</b><span>' + esc(window.Pandit.MODEL) + '</span></div>' : '') +
-      '<div class="field mt"><label>Anthropic API key ' + (aiOn ? '(बदलें)' : '') + '</label>' +
-      '<input id="setKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>' +
+      (aiOn ? '<div class="gridkv"><b>AI</b><span>' + esc(cur.name) + '</span>' +
+        '<b>Model</b><span>' + esc(state.ai.model || window.Pandit.CLAUDE_MODEL) + '</span>' +
+        '<b>Key</b><span>' + esc(state.ai.key.slice(0, 10)) + '…' + esc(state.ai.key.slice(-4)) + '</span></div>' +
+        (state.ai.provider === 'gemini'
+          ? '<div class="field mt"><label>Model बदलें</label><select id="setModel"><option value="">' +
+            esc(state.ai.model) + ' (अभी चालू)</option></select>' +
+            '<button class="btn ghost sm mt" id="btnReloadModels">उपलब्ध models देखें</button></div>' : '')
+        : '') +
+      '<div class="field mt"><label>कौन सा AI</label><select id="setProv">' +
+      Object.keys(PV).map(function (k) {
+        return '<option value="' + k + '"' + (state.ai.provider === k ? ' selected' : '') + '>' +
+          esc(PV[k].name) + (PV[k].free ? ' — मुफ़्त tier' : ' — paid') + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="field"><label>API key ' + (aiOn ? '(बदलें)' : '') + '</label>' +
+      '<input id="setKey" type="password" placeholder="' + esc(cur.keyHint) + '" autocomplete="off" spellcheck="false"></div>' +
       '<div class="btnrow"><button class="btn ghost" id="btnKeySave">key सहेजें</button>' +
       (aiOn ? '<button class="btn ghost" id="btnKeyOff" style="color:var(--rd)">बंद करें</button>' : '') +
-      '</div></div>';
+      '</div><p class="sub" id="setKeyMsg"></p></div>';
 
     h += '<div class="card"><h2><span class="ic">🔒</span> गोपनीयता</h2>' +
       '<p>कुंडली, दशा, गोचर, पंचांग और हस्तरेखा — सारी गणना इसी device पर होती है। ' +
       'हथेली की तस्वीर कभी device से बाहर नहीं जाती, किसी भी हालत में।</p>' +
       '<p>' + (aiOn
         ? 'पंडित जी चालू है, इसलिए वहाँ पूछा गया सवाल और कुंडली का सार (जन्म विवरण सहित) ' +
-          'सीधे api.anthropic.com जाता है। बीच में हमारा कोई server नहीं। बाक़ी सब offline ही है।'
+          'सीधे ' + esc(cur.name) + ' को जाता है। बीच में हमारा कोई server नहीं। बाक़ी सब offline ही है।'
         : 'पंडित जी बंद है, इसलिए अभी कोई भी जानकारी इस device से बाहर नहीं जाती।') + '</p>' +
       '<p class="sub">कोई analytics नहीं, कोई account नहीं। सब कुछ browser के localStorage में रहता है।</p>' +
       '<div class="btnrow"><button class="btn ghost" id="btnClearPalm">हस्तरेखा डेटा मिटाएँ</button>' +
@@ -861,15 +939,44 @@
     });
     $('#btnExport').addEventListener('click', exportReport);
     $('#btnKeySave').addEventListener('click', function () {
-      var k = $('#setKey').value.trim();
+      var k = $('#setKey').value.trim(), prov = $('#setProv').value;
       if (!k) return alert('key डालिए');
-      state.ai = { key: k, enabled: true };
-      saveAI(); badge(); renderMore();
+      if (prov !== 'gemini') {
+        state.ai = { provider: prov, key: k, model: '', enabled: true };
+        saveAI(); badge(); renderMore(); return;
+      }
+      $('#setKeyMsg').innerHTML = '<span class="spinner"></span> key जाँची जा रही है…';
+      window.Pandit.geminiModels(k).then(function (models) {
+        if (!models.length) { $('#setKeyMsg').textContent = 'इस key पर कोई chat model नहीं मिला।'; return; }
+        state.ai = { provider: 'gemini', key: k, model: models[0].id, enabled: true };
+        saveAI(); badge(); renderMore();
+      }).catch(function (e) {
+        $('#setKeyMsg').textContent = 'key जाँची नहीं जा सकी: ' + geminiErr(e);
+      });
+    });
+    var reload = $('#btnReloadModels');
+    if (reload) reload.addEventListener('click', function () {
+      var sel = $('#setModel');
+      reload.disabled = true;
+      window.Pandit.geminiModels(state.ai.key).then(function (models) {
+        reload.disabled = false;
+        sel.innerHTML = models.map(function (m) {
+          return '<option value="' + esc(m.id) + '"' + (m.id === state.ai.model ? ' selected' : '') +
+                 '>' + esc(m.label) + '</option>';
+        }).join('');
+        sel.onchange = function () {
+          state.ai.model = sel.value; saveAI();
+          $('#setKeyMsg').textContent = 'model बदल गया: ' + sel.value;
+        };
+      }).catch(function (e) {
+        reload.disabled = false;
+        $('#setKeyMsg').textContent = geminiErr(e);
+      });
     });
     var off = $('#btnKeyOff');
     if (off) off.addEventListener('click', function () {
       if (!confirm('पंडित जी बंद कर दें? key मिट जाएगी और app दोबारा पूरी तरह offline हो जाएगा।')) return;
-      state.ai = { key: '', enabled: false };
+      state.ai = { provider: state.ai.provider, key: '', model: '', enabled: false };
       localStorage.removeItem(AIKEY); badge(); renderMore();
     });
   }

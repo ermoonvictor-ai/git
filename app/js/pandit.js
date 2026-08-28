@@ -5,15 +5,22 @@
    user's question plus a summary of their own computed chart to the
    Claude API and streams the answer back.
 
-   The API key is the user's own, stored only in localStorage on this
-   device, and requests go directly to api.anthropic.com — there is no
-   intermediate server of ours.
+   Two providers are supported, both called directly from the device
+   with the user's own key — there is no intermediate server of ours:
+
+     claude  — Anthropic. Best answers; pay-as-you-go, no free tier.
+     gemini  — Google AI Studio. Has a genuinely free tier, so this is
+               the one that costs nothing to run.
+
+   Gemini model IDs are NOT hardcoded. Google renames and retires them
+   often, so the app asks the key itself which models it can use and
+   ranks what comes back.
    ============================================================ */
 (function (g) {
   'use strict';
   var A = g.Astro, D = g.JyotishData, R = g.Reading;
 
-  var MODEL = 'claude-opus-5';
+  var CLAUDE_MODEL = 'claude-opus-5';
 
   /* ---------- grounding context ----------
      The model must reason from the chart this app actually computed,
@@ -141,16 +148,14 @@
     ].join('\n');
   }
 
-  function makeClient(apiKey) {
-    if (typeof g.Anthropic !== 'function') throw new Error('SDK not loaded');
-    return new g.Anthropic({ apiKey: apiKey, dangerouslyAllowBrowser: true });
-  }
+  /* ---------------- provider: Claude ---------------- */
 
-  /* Streams one turn. onDelta receives text chunks as they arrive. */
-  function ask(opts) {
-    var client = makeClient(opts.apiKey);
+  function claudeAsk(opts) {
+    if (typeof g.Anthropic !== 'function') throw new Error('Anthropic SDK not loaded');
+    var client = new g.Anthropic({ apiKey: opts.apiKey, dangerouslyAllowBrowser: true });
+
     var stream = client.beta.messages.stream({
-      model: MODEL,
+      model: CLAUDE_MODEL,
       max_tokens: 16000,
       // A policy decline would otherwise just stop the turn; this re-runs it
       // on a fallback model inside the same call.
@@ -176,17 +181,113 @@
         }
       }
       var final = await stream.finalMessage();
-      if (final.stop_reason === 'refusal') {
-        return { refused: true, usage: final.usage };
-      }
-      return { refused: false, usage: final.usage, model: final.model };
+      return { refused: final.stop_reason === 'refusal', model: final.model };
     })();
   }
+
+  /* ---------------- provider: Gemini ---------------- */
+
+  function geminiClient(apiKey) {
+    if (typeof g.GoogleGenAI !== 'function') throw new Error('Google GenAI SDK not loaded');
+    return new g.GoogleGenAI({ apiKey: apiKey });
+  }
+
+  // Model IDs move around, so discover them instead of guessing. Returns the
+  // chat-capable models this key can actually reach, best first.
+  async function geminiModels(apiKey) {
+    var ai = geminiClient(apiKey);
+    var out = [];
+    var pager = await ai.models.list();
+    for await (var m of pager) {
+      var methods = m.supportedActions || m.supportedGenerationMethods || [];
+      if (methods.indexOf('generateContent') < 0) continue;
+      var id = String(m.name || '').replace(/^models\//, '');
+      if (!id) continue;
+      // drop everything that is not a text-chat model
+      if (/embedding|aqa|imagen|veo|tts|image-generation|native-audio|learnlm/i.test(id)) continue;
+      out.push({ id: id, label: m.displayName || id, rank: rankGemini(id) });
+    }
+    out.sort(function (a, b) { return b.rank - a.rank; });
+    return out;
+  }
+
+  // Prefer the free tier's most generous models: flash-lite has the highest
+  // daily allowance, then flash; newer version numbers win over older.
+  function rankGemini(id) {
+    var r = 0;
+    if (/flash-lite/.test(id)) r += 300;
+    else if (/flash/.test(id)) r += 200;
+    else if (/pro/.test(id)) r += 100;
+    var ver = id.match(/(\d+(?:\.\d+)?)/);
+    if (ver) r += parseFloat(ver[1]) * 5;
+    if (/preview|exp|thinking/.test(id)) r -= 40;   // less stable, tighter limits
+    if (/latest/.test(id)) r += 3;
+    return r;
+  }
+
+  function geminiAsk(opts) {
+    var ai = geminiClient(opts.apiKey);
+
+    // Gemini takes the system prompt separately and calls the assistant "model".
+    var contents = opts.messages.map(function (m) {
+      return { role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] };
+    });
+
+    return (async function () {
+      var stream = await ai.models.generateContentStream({
+        model: opts.model,
+        contents: contents,
+        config: {
+          systemInstruction: opts.system,
+          maxOutputTokens: 8192,
+          temperature: 0.8
+        }
+      });
+      var got = false, blocked = null;
+      for await (var chunk of stream) {
+        var t = chunk.text;
+        if (t) { got = true; opts.onDelta(t); }
+        var pf = chunk.promptFeedback;
+        if (pf && pf.blockReason) blocked = pf.blockReason;
+        var cand = (chunk.candidates || [])[0];
+        if (cand && cand.finishReason && cand.finishReason !== 'STOP' && cand.finishReason !== 'MAX_TOKENS') {
+          blocked = cand.finishReason;
+        }
+      }
+      return { refused: !got && !!blocked, blockReason: blocked, model: opts.model };
+    })();
+  }
+
+  /* ---------------- dispatch ---------------- */
+
+  function ask(opts) {
+    if (opts.provider === 'gemini') return geminiAsk(opts);
+    return claudeAsk(opts);
+  }
+
+  var PROVIDERS = {
+    claude: {
+      id: 'claude', name: 'Claude (Anthropic)',
+      keyHint: 'sk-ant-…', keyPrefix: 'sk-ant-',
+      console: 'console.anthropic.com',
+      cost: 'हर जवाब पर पैसा लगता है — कोई मुफ़्त tier नहीं। जवाब सबसे अच्छे।',
+      free: false
+    },
+    gemini: {
+      id: 'gemini', name: 'Gemini (Google AI Studio)',
+      keyHint: 'AIza…', keyPrefix: 'AIza',
+      console: 'aistudio.google.com/apikey',
+      cost: 'मुफ़्त tier है — रोज़ाना एक सीमा तक बिना पैसे के। card भी नहीं माँगता।',
+      free: true
+    }
+  };
 
   g.Pandit = {
     chartContext: chartContext,
     systemPrompt: systemPrompt,
     ask: ask,
-    MODEL: MODEL
+    geminiModels: geminiModels,
+    PROVIDERS: PROVIDERS,
+    CLAUDE_MODEL: CLAUDE_MODEL
   };
 })(window);

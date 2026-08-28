@@ -4,10 +4,11 @@ A private Vedic astrology and palm-reading app. Every calculation — charts, da
 panchang, transits, palm analysis — runs on your device, with no server of ours anywhere
 in the picture. Your palm photograph never leaves the phone under any setting.
 
-One feature is online and off by default: **Pandit**, a chat with Claude that reasons
-about your own computed chart. Turn it on and your question plus a summary of your chart
-goes to the Claude API with your own key; leave it off and the app makes no network calls
-at all.
+One feature is online and off by default: **Pandit**, a chat that reasons about your own
+computed chart. It runs on either **Gemini** (Google AI Studio — has a genuinely free
+tier, so it costs nothing) or **Claude** (better answers, pay-as-you-go). Turn it on with
+your own key and your question plus a chart summary goes to that provider; leave it off
+and the app makes no network calls at all.
 
 ---
 
@@ -74,7 +75,7 @@ Two details in the shell are load-bearing:
 | **दशा** | Vimshottari maha/antar/pratyantar with dates, effects of the running period, upcoming changes, the whole 120-year cycle |
 | **हस्तरेखा** | Camera or gallery palm scan, measured line metrics with the detected lines drawn back over your photo, mount relief, classical interpretation |
 | **संगम** | Chart and hand cross-referenced — mind, heart, career, vitality, dominant mount |
-| **पंडित** | *(online, opt-in)* Streaming chat with Claude, grounded in your computed chart |
+| **पंडित** | *(online, opt-in)* Streaming chat — Gemini or Claude — grounded in your computed chart |
 | **और** | Profile, method notes, plain-text report export, one-tap data wipe |
 
 ## Astronomy
@@ -130,21 +131,33 @@ today's panchang, tara bala and transits; and the measured palm metrics if a sca
 The system prompt tells the model to reason only from that data and to say so when
 something isn't in it, which is what keeps it from inventing placements.
 
-Requests use the official `@anthropic-ai/sdk`, vendored as a prebuilt browser bundle
-(see `app/js/vendor/README.md` — the app has no build step and must run from APK assets).
-Model `claude-opus-5`, streaming, adaptive thinking at `medium` effort, with server-side
-refusal fallbacks enabled and the chart cached as a stable system prefix so follow-up
-turns are cheap.
+Two providers, both called directly from the device with the user's own key:
+
+- **Gemini** (`@google/genai`) — the free option. Model IDs are **not** hardcoded: Google
+  renames and retires them often, so the app asks the key itself which models it can reach
+  (`models.list`), drops the non-chat ones, and ranks what is left — flash-lite first
+  (highest free daily allowance), then flash, then pro, newer versions ahead of older.
+  The chosen model is shown in Settings and can be changed there.
+- **Claude** (`@anthropic-ai/sdk`) — `claude-opus-5`, streaming, adaptive thinking at
+  `medium` effort, server-side refusal fallbacks on, and the chart cached as a stable
+  system prefix so follow-up turns are cheap.
+
+Both SDKs are the official ones, vendored as one prebuilt browser bundle — see
+`app/js/vendor/README.md`; the app has no build step and must run from APK assets.
 
 **What is sent:** your question and that chart summary, which includes your birth date,
 time and place. **What is never sent:** the palm photograph. It is analysed on-device and
 only the resulting numbers can travel.
 
-**The key is yours.** You paste an Anthropic API key, it is stored in `localStorage` on
-that device only, and requests go straight to `api.anthropic.com` — there is no server of
-ours in between, and billing is on your own account. That does mean the key lives in the
-app; for a single-user personal app that is the trade for having no backend at all. The
+**The key is yours.** You paste your own key, it is stored in `localStorage` on that
+device only, and requests go straight to the provider — there is no server of ours in
+between, and any billing is on your own account. That does mean the key lives in the app;
+for a single-user personal app that is the trade for having no backend at all. The
 settings tab turns it off and deletes the key.
+
+A key is unavoidable: no hosted model is free and unlimited, and embedding one in a
+public APK would hand it to everyone who downloads it. Gemini's free tier is the way to
+run this at zero cost.
 
 The Android manifest requests `INTERNET` for this feature. Before it existed the app had
 no such permission and the offline guarantee was enforced by the platform; now it is
@@ -163,7 +176,7 @@ app/
   js/reading.js           report generation (natal, dasha, daily, palm, fusion)
   js/cities.js            201 offline places with lat/lon/tz
   js/pandit.js            grounding context + Claude API calls (the online feature)
-  js/vendor/              prebuilt @anthropic-ai/sdk browser bundle
+  js/vendor/              prebuilt @anthropic-ai/sdk + @google/genai browser bundle
   js/app.js               UI
   sw.js                   offline cache
   manifest.webmanifest
