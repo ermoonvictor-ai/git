@@ -1,8 +1,13 @@
 # Jyoti — निजी ज्योतिष व हस्तरेखा
 
-A private, **fully offline** Vedic astrology and palm-reading app. No server, no account,
-no analytics, no network calls of any kind. Your birth details and your palm photograph
-never leave the device.
+A private Vedic astrology and palm-reading app. Every calculation — charts, dasha,
+panchang, transits, palm analysis — runs on your device, with no server of ours anywhere
+in the picture. Your palm photograph never leaves the phone under any setting.
+
+One feature is online and off by default: **Pandit**, a chat with Claude that reasons
+about your own computed chart. Turn it on and your question plus a summary of your chart
+goes to the Claude API with your own key; leave it off and the app makes no network calls
+at all.
 
 ---
 
@@ -69,6 +74,7 @@ Two details in the shell are load-bearing:
 | **दशा** | Vimshottari maha/antar/pratyantar with dates, effects of the running period, upcoming changes, the whole 120-year cycle |
 | **हस्तरेखा** | Camera or gallery palm scan, measured line metrics with the detected lines drawn back over your photo, mount relief, classical interpretation |
 | **संगम** | Chart and hand cross-referenced — mind, heart, career, vitality, dominant mount |
+| **पंडित** | *(online, opt-in)* Streaming chat with Claude, grounded in your computed chart |
 | **और** | Profile, method notes, plain-text report export, one-tap data wipe |
 
 ## Astronomy
@@ -115,6 +121,35 @@ This is a heuristic measurement, not a medical scanner, and image quality moves 
 result — which is why every report shows its confidence and lists what was wrong with
 the photo.
 
+## The Pandit chat (the only online part)
+
+`app/js/pandit.js` builds a grounding context from what the app already computed — every
+graha with sign, degree, bhava, nakshatra, dignity and navamsa; the twelve houses with
+lords, occupants and aspects; detected yogas; the running Vimshottari chain with dates;
+today's panchang, tara bala and transits; and the measured palm metrics if a scan exists.
+The system prompt tells the model to reason only from that data and to say so when
+something isn't in it, which is what keeps it from inventing placements.
+
+Requests use the official `@anthropic-ai/sdk`, vendored as a prebuilt browser bundle
+(see `app/js/vendor/README.md` — the app has no build step and must run from APK assets).
+Model `claude-opus-5`, streaming, adaptive thinking at `medium` effort, with server-side
+refusal fallbacks enabled and the chart cached as a stable system prefix so follow-up
+turns are cheap.
+
+**What is sent:** your question and that chart summary, which includes your birth date,
+time and place. **What is never sent:** the palm photograph. It is analysed on-device and
+only the resulting numbers can travel.
+
+**The key is yours.** You paste an Anthropic API key, it is stored in `localStorage` on
+that device only, and requests go straight to `api.anthropic.com` — there is no server of
+ours in between, and billing is on your own account. That does mean the key lives in the
+app; for a single-user personal app that is the trade for having no backend at all. The
+settings tab turns it off and deletes the key.
+
+The Android manifest requests `INTERNET` for this feature. Before it existed the app had
+no such permission and the offline guarantee was enforced by the platform; now it is
+enforced by the feature being off. Everything else still runs with the radio off.
+
 ## Layout
 
 ```
@@ -127,6 +162,8 @@ app/
   js/palm-data.js         hast-rekha interpretation layer
   js/reading.js           report generation (natal, dasha, daily, palm, fusion)
   js/cities.js            201 offline places with lat/lon/tz
+  js/pandit.js            grounding context + Claude API calls (the online feature)
+  js/vendor/              prebuilt @anthropic-ai/sdk browser bundle
   js/app.js               UI
   sw.js                   offline cache
   manifest.webmanifest

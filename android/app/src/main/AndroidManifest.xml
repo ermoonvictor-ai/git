@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- The palm scanner needs the camera. There is deliberately no
-         INTERNET permission: the app cannot reach the network even if it
-         wanted to, which makes the privacy guarantee enforceable rather
-         than merely promised. -->
+    <!-- The palm scanner needs the camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- INTERNET is required by exactly one feature: the Pandit chat, which
+         calls the Claude API and is off until the user supplies their own key.
+         Chart maths, panchang and palm analysis never touch the network, and
+         the palm photograph never leaves the device under any setting. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application

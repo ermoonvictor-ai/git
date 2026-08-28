@@ -2,7 +2,8 @@
 (function () {
   'use strict';
   var A = window.Astro, D = window.JyotishData, R = window.Reading, P = window.Palm;
-  var KEY = 'jyoti.profile.v1', PALMKEY = 'jyoti.palm.v1';
+  var KEY = 'jyoti.profile.v1', PALMKEY = 'jyoti.palm.v1',
+      AIKEY = 'jyoti.ai.v1', CHATKEY = 'jyoti.chat.v1';
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -13,12 +14,29 @@
   }
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; }
 
-  var state = { profile: null, chart: null, natal: null, palm: null, view: 'Today', stream: null };
+  var state = { profile: null, chart: null, natal: null, palm: null, view: 'Today', stream: null,
+                ai: { key: '', enabled: false }, chat: [], busy: false };
 
   /* ---------------- storage ---------------- */
   function load() {
     try { state.profile = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { state.profile = null; }
     try { state.palm = JSON.parse(localStorage.getItem(PALMKEY) || 'null'); } catch (e) { state.palm = null; }
+    try { state.ai = JSON.parse(localStorage.getItem(AIKEY) || 'null') || { key: '', enabled: false }; }
+    catch (e) { state.ai = { key: '', enabled: false }; }
+    try { state.chat = JSON.parse(localStorage.getItem(CHATKEY) || '[]'); } catch (e) { state.chat = []; }
+  }
+
+  function saveAI() { localStorage.setItem(AIKEY, JSON.stringify(state.ai)); }
+  function saveChat() {
+    // keep the tail; a long history is both slow and expensive to resend
+    try { localStorage.setItem(CHATKEY, JSON.stringify(state.chat.slice(-40))); } catch (e) {}
+  }
+  function badge() {
+    var el = $('#privacyBadge');
+    if (!el) return;
+    var on = state.ai.enabled && state.ai.key;
+    el.textContent = on ? '🌐 पंडित online' : '🔒 offline';
+    el.classList.toggle('online', !!on);
   }
   function save() {
     localStorage.setItem(KEY, JSON.stringify(state.profile));
@@ -54,6 +72,7 @@
     else if (v === 'Dasha') renderDasha();
     else if (v === 'Palm') renderPalm();
     else if (v === 'Fusion') renderFusion();
+    else if (v === 'Pandit') renderPandit();
     else if (v === 'More') renderMore();
   }
 
@@ -564,6 +583,205 @@
     body.innerHTML = h;
   }
 
+  /* ---------------- PANDIT (the one online feature) ---------------- */
+
+  var SUGGESTIONS = [
+    'मेरी कुंडली का सबसे मज़बूत पक्ष क्या है?',
+    'अभी चल रही दशा मेरे करियर के लिए कैसी है?',
+    'शादी को लेकर मेरी कुंडली क्या कहती है?',
+    'अगले दो साल में क्या बदलाव आ सकता है?',
+    'मेरी हथेली और कुंडली में कहाँ फ़र्क़ है?',
+    'मुझे कौन सा उपाय सबसे पहले करना चाहिए?'
+  ];
+
+  function renderPandit() {
+    var body = $('#panditBody');
+
+    if (!state.ai.enabled || !state.ai.key) {
+      body.innerHTML = gateHTML();
+      wireGate();
+      return;
+    }
+
+    var h = '<div class="card tight">' +
+      '<h2><span class="ic">💬</span> पंडित जी</h2>' +
+      '<p class="sub" style="margin:0">आपकी अपनी कुंडली, दशा, गोचर' +
+      (state.palm ? ' और हस्तरेखा' : '') + ' सामने रखकर जवाब देंगे। ' +
+      '<b style="color:var(--bl)">यह अकेला feature online है।</b></p>' +
+      '</div>';
+
+    h += '<div class="chatwrap" id="chatWrap">' +
+      (state.chat.length ? state.chat.map(bubble).join('') : '') +
+      '</div>';
+
+    if (!state.chat.length) {
+      h += '<div class="card tight"><p class="sub">कुछ इस तरह पूछ सकते हैं:</p><div id="sugg">' +
+        SUGGESTIONS.map(function (q) { return '<span class="qchip">' + esc(q) + '</span>'; }).join('') +
+        '</div></div>';
+    }
+
+    h += '<div class="composer">' +
+      '<textarea id="chatIn" rows="1" placeholder="अपना सवाल लिखिए…"></textarea>' +
+      '<button id="chatSend" title="भेजें">➤</button></div>';
+
+    h += '<div class="center" style="margin-bottom:10px">' +
+      '<button class="btn ghost sm" id="chatClear">बातचीत मिटाएँ</button></div>';
+
+    body.innerHTML = h;
+    wireChat();
+    scrollChat();
+  }
+
+  function bubble(m) {
+    if (m.role === 'error') return '<div class="msg err">' + esc(m.content) + '</div>';
+    return '<div class="msg ' + (m.role === 'user' ? 'me' : 'ai') + '">' + esc(m.content) + '</div>';
+  }
+
+  function gateHTML() {
+    return '<div class="card"><h2><span class="ic">💬</span> पंडित जी — online सलाह</h2>' +
+      '<p>बाक़ी पूरा app आपके फ़ोन के अंदर ही चलता है। यह एक feature अलग है — इसमें आपका सवाल और ' +
+      'आपकी कुंडली का सार Anthropic के Claude API को भेजा जाता है, तभी जवाब आता है।</p>' +
+      '<div class="note"><b>क्या-क्या भेजा जाता है:</b> आपका सवाल, और गणना की हुई कुंडली का सार — ' +
+      'लग्न, ग्रह, भाव, योग, चल रही दशा, आज का गोचर, और अगर हस्तरेखा scan किया है तो उसके माप। ' +
+      '<b>तस्वीर कभी नहीं भेजी जाती।</b> जन्म की तारीख़/समय/जगह context में शामिल है ताकि पंडित जी ' +
+      'सही गणना पर बात कर सकें।</div>' +
+      '<div class="warn">API key आपकी अपनी होगी और सिर्फ़ इसी फ़ोन के localStorage में रहेगी। ' +
+      'Request सीधे api.anthropic.com जाती है — बीच में हमारा कोई server नहीं। ' +
+      'बिल आपके अपने Anthropic account पर आएगा।</div>' +
+      '<div class="field"><label>Anthropic API key</label>' +
+      '<input id="aiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>' +
+      '<p class="sub">key यहाँ से बनती है: <b>console.anthropic.com → API keys</b></p>' +
+      '<button class="btn" id="aiEnable">चालू करें</button>' +
+      '<button class="btn ghost mt" id="aiSkip">रहने दें, offline ही ठीक है</button>' +
+      '</div>';
+  }
+
+  function wireGate() {
+    $('#aiEnable').addEventListener('click', function () {
+      var k = $('#aiKey').value.trim();
+      if (!k) return alert('API key डालिए');
+      if (k.indexOf('sk-ant-') !== 0) {
+        if (!confirm('यह Anthropic key जैसी नहीं लग रही (sk-ant-… से शुरू होती है)। फिर भी आगे बढ़ें?')) return;
+      }
+      state.ai = { key: k, enabled: true };
+      saveAI(); badge(); renderPandit();
+    });
+    $('#aiSkip').addEventListener('click', function () { show('Today'); });
+  }
+
+  function wireChat() {
+    var inp = $('#chatIn'), btn = $('#chatSend');
+
+    inp.addEventListener('input', function () {
+      inp.style.height = 'auto';
+      inp.style.height = Math.min(150, inp.scrollHeight) + 'px';
+    });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    btn.addEventListener('click', send);
+
+    var sg = $('#sugg');
+    if (sg) $$('.qchip', sg).forEach(function (c) {
+      c.addEventListener('click', function () { inp.value = c.textContent; send(); });
+    });
+
+    $('#chatClear').addEventListener('click', function () {
+      if (!confirm('पूरी बातचीत मिटा दें?')) return;
+      state.chat = []; saveChat(); renderPandit();
+    });
+
+    function send() {
+      var q = inp.value.trim();
+      if (!q || state.busy) return;
+      inp.value = ''; inp.style.height = 'auto';
+      askPandit(q);
+    }
+  }
+
+  function scrollChat() {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  }
+
+  function askPandit(question) {
+    state.busy = true;
+    state.chat.push({ role: 'user', content: question });
+    saveChat();
+
+    var wrap = $('#chatWrap');
+    var sg = $('#sugg');
+    if (sg) sg.closest('.card').remove();   // drop the suggestion card, not the view
+    wrap.insertAdjacentHTML('beforeend', bubble({ role: 'user', content: question }));
+
+    var out = el('<div class="msg ai"><span class="cursor"></span></div>');
+    wrap.appendChild(out);
+    $('#chatSend').disabled = true;
+    scrollChat();
+
+    var jd = nowJD();
+    var ctx = window.Pandit.chartContext(state.profile, state.chart, state.natal,
+                                         state.palm ? state.palm.report : null, jd);
+    var sys = window.Pandit.systemPrompt(ctx);
+
+    // Only user/assistant turns go back to the model; error bubbles are UI-only.
+    var history = state.chat.filter(function (m) { return m.role === 'user' || m.role === 'assistant'; })
+      .map(function (m) { return { role: m.role, content: m.content }; });
+
+    var acc = '';
+    window.Pandit.ask({
+      apiKey: state.ai.key,
+      system: sys,
+      messages: history,
+      onDelta: function (t) {
+        acc += t;
+        out.innerHTML = esc(acc) + '<span class="cursor"></span>';
+        scrollChat();
+      }
+    }).then(function (res) {
+      if (res.refused) {
+        acc = acc || 'इस सवाल का जवाब देने से मॉडल ने मना कर दिया। कृपया सवाल दूसरे शब्दों में पूछिए।';
+      }
+      out.innerHTML = esc(acc);
+      state.chat.push({ role: 'assistant', content: acc });
+      saveChat();
+    }).catch(function (e) {
+      out.remove();
+      var msg = friendlyErr(e);
+      wrap.insertAdjacentHTML('beforeend', bubble({ role: 'error', content: msg }));
+      state.chat.push({ role: 'error', content: msg });
+      saveChat();
+    }).then(function () {
+      state.busy = false;
+      var b = $('#chatSend'); if (b) b.disabled = false;
+      scrollChat();
+    });
+  }
+
+  // Most-specific-first chain over the SDK's typed errors — a single broad
+  // catch would blur retryable failures into permanent ones.
+  function friendlyErr(e) {
+    var A = window.Anthropic;
+    if (A) {
+      if (e instanceof A.AuthenticationError)
+        return 'API key स्वीकार नहीं हुई (401). "और" टैब से key दोबारा डालिए।';
+      if (e instanceof A.PermissionDeniedError)
+        return 'इस key को इस model की अनुमति नहीं है (403). Anthropic console में plan/permissions देखिए।';
+      if (e instanceof A.RateLimitError)
+        return 'बहुत तेज़ी से requests गईं, या credit ख़त्म हो गया (429). थोड़ी देर बाद कोशिश कीजिए।';
+      if (e instanceof A.BadRequestError)
+        return 'Request अस्वीकार हुई (400): ' + (e.message || '');
+      if (e instanceof A.InternalServerError)
+        return 'Anthropic की तरफ़ से सर्वर त्रुटि. थोड़ी देर बाद फिर कोशिश कीजिए।';
+      if (e instanceof A.APIConnectionTimeoutError)
+        return 'जवाब आने में बहुत देर लगी. दोबारा भेजिए।';
+      if (e instanceof A.APIConnectionError)
+        return 'इंटरनेट से जुड़ नहीं पाए। बाक़ी app offline चलता रहेगा — कुंडली, दशा और हस्तरेखा सब चलेंगे।';
+      if (e instanceof A.APIError)
+        return 'API त्रुटि' + (e.status ? ' (' + e.status + ')' : '') + ': ' + (e.message || '');
+    }
+    return 'त्रुटि: ' + ((e && e.message) || e);
+  }
+
   /* ---------------- MORE ---------------- */
   function renderMore() {
     var c = state.chart;
@@ -581,9 +799,28 @@
       '<button class="btn ghost" id="btnExport">रिपोर्ट सहेजें</button></div>' +
       '</div>';
 
+    var aiOn = state.ai.enabled && state.ai.key;
+    h += '<div class="card"><h2><span class="ic">💬</span> पंडित जी (online)</h2>' +
+      '<p class="sub">सिर्फ़ यही एक feature इंटरनेट इस्तेमाल करता है। ' +
+      'अभी: <b style="color:' + (aiOn ? 'var(--bl)' : 'var(--gr)') + '">' +
+      (aiOn ? 'चालू' : 'बंद') + '</b></p>' +
+      (aiOn ? '<div class="gridkv"><b>Key</b><span>' +
+        esc(state.ai.key.slice(0, 12)) + '…' + esc(state.ai.key.slice(-4)) + '</span>' +
+        '<b>Model</b><span>' + esc(window.Pandit.MODEL) + '</span></div>' : '') +
+      '<div class="field mt"><label>Anthropic API key ' + (aiOn ? '(बदलें)' : '') + '</label>' +
+      '<input id="setKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>' +
+      '<div class="btnrow"><button class="btn ghost" id="btnKeySave">key सहेजें</button>' +
+      (aiOn ? '<button class="btn ghost" id="btnKeyOff" style="color:var(--rd)">बंद करें</button>' : '') +
+      '</div></div>';
+
     h += '<div class="card"><h2><span class="ic">🔒</span> गोपनीयता</h2>' +
-      '<p>यह app पूरी तरह offline है। कोई भी जानकारी — जन्म विवरण या हथेली की तस्वीर — इस device से बाहर नहीं जाती। ' +
-      'कोई server, कोई analytics, कोई account नहीं। सब कुछ browser के localStorage में रहता है।</p>' +
+      '<p>कुंडली, दशा, गोचर, पंचांग और हस्तरेखा — सारी गणना इसी device पर होती है। ' +
+      'हथेली की तस्वीर कभी device से बाहर नहीं जाती, किसी भी हालत में।</p>' +
+      '<p>' + (aiOn
+        ? 'पंडित जी चालू है, इसलिए वहाँ पूछा गया सवाल और कुंडली का सार (जन्म विवरण सहित) ' +
+          'सीधे api.anthropic.com जाता है। बीच में हमारा कोई server नहीं। बाक़ी सब offline ही है।'
+        : 'पंडित जी बंद है, इसलिए अभी कोई भी जानकारी इस device से बाहर नहीं जाती।') + '</p>' +
+      '<p class="sub">कोई analytics नहीं, कोई account नहीं। सब कुछ browser के localStorage में रहता है।</p>' +
       '<div class="btnrow"><button class="btn ghost" id="btnClearPalm">हस्तरेखा डेटा मिटाएँ</button>' +
       '<button class="btn ghost" id="btnClearAll" style="color:var(--rd)">सब मिटाएँ</button></div></div>';
 
@@ -619,10 +856,22 @@
     });
     $('#btnClearAll').addEventListener('click', function () {
       if (!confirm('सारा डेटा स्थायी रूप से मिट जाएगा। जारी रखें?')) return;
-      localStorage.removeItem(KEY); localStorage.removeItem(PALMKEY);
+      [KEY, PALMKEY, AIKEY, CHATKEY].forEach(function (k) { localStorage.removeItem(k); });
       location.reload();
     });
     $('#btnExport').addEventListener('click', exportReport);
+    $('#btnKeySave').addEventListener('click', function () {
+      var k = $('#setKey').value.trim();
+      if (!k) return alert('key डालिए');
+      state.ai = { key: k, enabled: true };
+      saveAI(); badge(); renderMore();
+    });
+    var off = $('#btnKeyOff');
+    if (off) off.addEventListener('click', function () {
+      if (!confirm('पंडित जी बंद कर दें? key मिट जाएगी और app दोबारा पूरी तरह offline हो जाएगा।')) return;
+      state.ai = { key: '', enabled: false };
+      localStorage.removeItem(AIKEY); badge(); renderMore();
+    });
   }
 
   function exportReport() {
@@ -733,6 +982,7 @@
       try {
         rebuild();
         $('#palmHand').value = state.profile.hand || 'right';
+        badge();
         show('Today');
       } catch (err) {
         console.error(err);

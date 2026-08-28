@@ -22,7 +22,7 @@
       <small id="brandSub">निजी ज्योतिष व हस्तरेखा</small>
     </div>
   </div>
-  <span class="privacy">🔒 100% offline</span>
+  <span class="privacy" id="privacyBadge">🔒 offline</span>
 </header>
 
 <div class="app">
@@ -131,6 +131,11 @@
   <div id="fusionBody"></div>
 </section>
 
+<!-- ============ PANDIT (online AI) ============ -->
+<section id="vPandit" class="view">
+  <div id="panditBody"></div>
+</section>
+
 <!-- ============ SETTINGS ============ -->
 <section id="vMore" class="view">
   <div id="moreBody"></div>
@@ -148,6 +153,7 @@
   <button data-v="Dasha"><span class="i">🕉️</span>दशा</button>
   <button data-v="Palm"><span class="i">🖐️</span>हस्तरेखा</button>
   <button data-v="Fusion"><span class="i">🔮</span>संगम</button>
+  <button data-v="Pandit"><span class="i">💬</span>पंडित</button>
   <button data-v="More"><span class="i">⚙️</span>और</button>
 </nav>
 
@@ -157,6 +163,8 @@
 <script src="js/palm.js"></script>
 <script src="js/cities.js"></script>
 <script src="js/reading.js"></script>
+<script src="js/vendor/anthropic-sdk.js"></script>
+<script src="js/pandit.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
