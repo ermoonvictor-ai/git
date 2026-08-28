@@ -4,8 +4,48 @@ A private, **fully offline** Vedic astrology and palm-reading app. No server, no
 no analytics, no network calls of any kind. Your birth details and your palm photograph
 never leave the device.
 
-Open `app/index.html` in a browser, or serve the `app/` folder and install it as a PWA
-("Add to Home Screen") — it then works with the network switched off entirely.
+---
+
+## Getting it on your phone
+
+### Option A — install the web app (no APK needed, ~1 minute)
+
+Serve the `app/` folder over `https://` (or `http://localhost`) and open it in Chrome,
+then **⋮ → Add to Home Screen**. You get a home-screen icon, a full-screen app with no
+browser chrome, working camera, and it keeps running with the network switched off.
+
+A secure origin is required — the palm scanner uses `getUserMedia()`, which browsers
+refuse on a plain `file://` page.
+
+### Option B — a real APK
+
+`android/` holds a minimal Android shell around the same web app. It is not a second
+codebase: Gradle mounts `app/` directly as the APK's assets, so the web app stays the
+single source of truth.
+
+**Download a built APK:** the *Build APK* GitHub Actions workflow runs on every push and
+can be started by hand from the **Actions** tab (*Build APK → Run workflow*). Open the
+finished run and download the `jyoti-apk-<sha>` artifact; unzip it to get `app-debug.apk`.
+Pushing a `v*` tag additionally attaches the APK to a GitHub Release.
+
+**Build it yourself** (needs the Android SDK and JDK 17):
+
+```bash
+cd android && ./gradlew assembleDebug
+# android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Installing it means allowing "install unknown apps" for whatever app you transfer it
+with — it is a debug-signed build, not a Play Store one.
+
+Two details in the shell are load-bearing:
+
+- The page is served through `WebViewAssetLoader` on
+  `https://appassets.androidplatform.net/` rather than `file:///android_asset/`, because
+  `file://` is not a secure context and the camera would be unavailable there. That host
+  is served straight out of the APK.
+- The manifest requests **no `INTERNET` permission**. The app is not merely promising not
+  to phone home; Android will not let it.
 
 ---
 
@@ -79,6 +119,8 @@ app/
   js/app.js               UI
   sw.js                   offline cache
   manifest.webmanifest
+android/                  minimal WebView shell; mounts app/ as its assets
+.github/workflows/        Build APK workflow
 ```
 
 ## Honest note
