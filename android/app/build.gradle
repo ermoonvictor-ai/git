@@ -31,6 +31,12 @@ android {
 }
 
 dependencies {
+    // Pins every Kotlin artifact to one version. Without it appcompat's
+    // kotlin-stdlib 1.8.22 collides with a transitive kotlin-stdlib-jdk8 1.6.21:
+    // the jdk7/jdk8 artifacts were folded into kotlin-stdlib in Kotlin 1.8, so
+    // the two jars declare the same classes and checkDuplicateClasses fails.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.webkit:webkit:1.11.0'
     implementation 'androidx.core:core:1.13.1'
