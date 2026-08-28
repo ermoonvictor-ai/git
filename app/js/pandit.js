@@ -258,9 +258,95 @@
     })();
   }
 
+  /* ---------------- provider: on-device ----------------
+     Only exists inside the Android app, where MainActivity exposes the
+     bridge. In a browser this provider reports itself unavailable. */
+
+  function nativeBridge() {
+    var n = g.JyotiNative;
+    return (n && typeof n.available === 'function' && n.available()) ? n : null;
+  }
+
+  function localAvailable() { return !!nativeBridge(); }
+  function localHasModel() { var n = nativeBridge(); return !!n && n.hasModel(); }
+  function localModelSize() { var n = nativeBridge(); return n ? n.modelSize() : 0; }
+
+  // The native side calls these; only one operation runs at a time.
+  var pendingGen = null, pendingModel = null;
+
+  g.__jyotiLocalDelta = function (text, done) {
+    if (!pendingGen) return;
+    if (text) pendingGen.onDelta(text);
+    if (done) { var p = pendingGen; pendingGen = null; p.resolve({ refused: false, model: 'on-device' }); }
+  };
+  g.__jyotiLocalEvent = function (kind, detail) {
+    if (kind === 'gen_error') {
+      if (!pendingGen) return;
+      var p = pendingGen; pendingGen = null; p.reject(new Error(detail));
+      return;
+    }
+    if (!pendingModel) return;
+    var m = pendingModel;
+    if (kind === 'model_ready') { pendingModel = null; m.resolve(); }
+    else if (kind === 'model_error') { pendingModel = null; m.reject(new Error(detail)); }
+  };
+  g.__jyotiLocalProgress = function (done, total) {
+    if (pendingModel && pendingModel.onProgress) pendingModel.onProgress(done, total);
+  };
+
+  function localInstall(opts) {
+    var n = nativeBridge();
+    if (!n) return Promise.reject(new Error('on-device model works only in the Android app'));
+    if (pendingModel) return Promise.reject(new Error('a model transfer is already running'));
+    return new Promise(function (resolve, reject) {
+      pendingModel = { resolve: resolve, reject: reject, onProgress: opts.onProgress };
+      try {
+        if (opts.url) n.downloadModel(opts.url);
+        else n.pickModel();
+      } catch (e) { pendingModel = null; reject(e); }
+    });
+  }
+
+  function localDelete() {
+    var n = nativeBridge();
+    return n ? n.deleteModel() : false;
+  }
+
+  /* A small on-device model cannot be trusted with a 5,000-token chart the way
+     a frontier model can, so it gets a trimmed brief and a tighter instruction. */
+  function localPrompt(system, messages) {
+    var last = messages[messages.length - 1];
+    var prior = messages.slice(0, -1).slice(-4);
+    var L = [];
+    L.push(system);
+    L.push('');
+    L.push('Answer in the same language as the question. Keep it under 150 words.');
+    L.push('Use only the chart above. Do not invent placements.');
+    L.push('');
+    prior.forEach(function (m) {
+      L.push((m.role === 'user' ? 'Question' : 'Jyotishi') + ': ' + m.content);
+    });
+    L.push('Question: ' + (last ? last.content : ''));
+    L.push('Jyotishi:');
+    return L.join('\n');
+  }
+
+  function localAsk(opts) {
+    var n = nativeBridge();
+    if (!n) return Promise.reject(new Error('on-device model works only in the Android app'));
+    if (!n.hasModel()) return Promise.reject(new Error('no model installed yet'));
+    if (pendingGen) return Promise.reject(new Error('already answering'));
+    return new Promise(function (resolve, reject) {
+      pendingGen = { onDelta: opts.onDelta, resolve: resolve, reject: reject };
+      try { n.generate(localPrompt(opts.system, opts.messages)); }
+      catch (e) { pendingGen = null; reject(e); }
+    });
+  }
+
   /* ---------------- dispatch ---------------- */
 
   function ask(opts) {
+    if (opts.provider === 'local') return localAsk(opts);
     if (opts.provider === 'gemini') return geminiAsk(opts);
     return claudeAsk(opts);
   }
@@ -271,14 +357,21 @@
       keyHint: 'sk-ant-…', keyPrefix: 'sk-ant-',
       console: 'console.anthropic.com',
       cost: 'हर जवाब पर पैसा लगता है — कोई मुफ़्त tier नहीं। जवाब सबसे अच्छे।',
-      free: false
+      free: false, needsKey: true
+    },
+    local: {
+      id: 'local', name: 'फ़ोन में ही (on-device)',
+      keyHint: '', keyPrefix: '', console: '',
+      cost: 'कोई key नहीं, कोई बिल नहीं, internet भी नहीं — सच में unlimited। ' +
+            'जवाब cloud जितने अच्छे नहीं होंगे और पुराने फ़ोन पर धीमे चलेंगे।',
+      free: true, needsKey: false, androidOnly: true
     },
     gemini: {
       id: 'gemini', name: 'Gemini (Google AI Studio)',
       keyHint: 'AIza…', keyPrefix: 'AIza',
       console: 'aistudio.google.com/apikey',
       cost: 'मुफ़्त tier है — रोज़ाना एक सीमा तक बिना पैसे के। card भी नहीं माँगता।',
-      free: true
+      free: true, needsKey: true
     }
   };
 
@@ -287,6 +380,11 @@
     systemPrompt: systemPrompt,
     ask: ask,
     geminiModels: geminiModels,
+    localAvailable: localAvailable,
+    localHasModel: localHasModel,
+    localModelSize: localModelSize,
+    localInstall: localInstall,
+    localDelete: localDelete,
     PROVIDERS: PROVIDERS,
     CLAUDE_MODEL: CLAUDE_MODEL
   };

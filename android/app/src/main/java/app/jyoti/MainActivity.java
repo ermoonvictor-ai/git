@@ -12,6 +12,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebViewClient;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -41,6 +42,8 @@ public class MainActivity extends AppCompatActivity {
     private WebView web;
     private WebViewAssetLoader loader;
     private ValueCallback<Uri[]> pendingFileCallback;
+    private LocalLlm llm;
+    private ValueCallback<Uri[]> unusedFileCallbackGuard;   // kept for clarity of intent
     private PermissionRequest pendingCameraRequest;
 
     private final ActivityResultLauncher<String[]> filePicker =
@@ -48,6 +51,15 @@ public class MainActivity extends AppCompatActivity {
                 if (pendingFileCallback == null) return;
                 pendingFileCallback.onReceiveValue(uri == null ? null : new Uri[]{uri});
                 pendingFileCallback = null;
+            });
+
+    private final ActivityResultLauncher<String[]> modelPicker =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri == null) { jsEvent("model_error", "cancelled"); return; }
+                llm.importFrom(uri,
+                        (done, total) -> jsProgress(done, total),
+                        () -> jsEvent("model_ready", ""),
+                        msg -> jsEvent("model_error", msg));
             });
 
     private final ActivityResultLauncher<String> cameraPermission =
@@ -141,6 +153,9 @@ public class MainActivity extends AppCompatActivity {
         getWindow().setStatusBarColor(0xFF0B0A14);
         getWindow().setNavigationBarColor(0xFF0F0D20);
 
+        llm = new LocalLlm(this);
+        web.addJavascriptInterface(new Bridge(), "JyotiNative");
+
         if (saved == null) web.loadUrl(ORIGIN + "/index.html");
         else web.restoreState(saved);
     }
@@ -161,5 +176,79 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         if (web != null) web.destroy();
         super.onDestroy();
+    }
+
+    /* ---------------- JS bridge ----------------
+       The web layer owns the prompt and the conversation; this only exposes
+       the model file and the token stream. Everything here is same-origin
+       with the page, which is served from inside the APK. */
+
+    private void jsCall(String fn, String jsonArg) {
+        final String js = "window." + fn + " && window." + fn + "(" + jsonArg + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
+
+    private static String q(String s) {
+        if (s == null) s = "";
+        StringBuilder b = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': b.append("\\\""); break;
+                case '\\': b.append("\\\\"); break;
+                case '\n': b.append("\\n"); break;
+                case '\r': b.append("\\r"); break;
+                case '\t': b.append("\\t"); break;
+                default:
+                    if (c < 0x20 || c == 0x2028 || c == 0x2029) b.append(String.format("\\u%04x", (int) c));
+                    else b.append(c);
+            }
+        }
+        return b.append('"').toString();
+    }
+
+    private void jsEvent(String kind, String detail) {
+        jsCall("__jyotiLocalEvent", q(kind) + "," + q(detail));
+    }
+
+    private void jsProgress(long done, long total) {
+        jsCall("__jyotiLocalProgress", done + "," + total);
+    }
+
+    private class Bridge {
+        @JavascriptInterface
+        public boolean available() { return true; }
+
+        @JavascriptInterface
+        public boolean hasModel() { return llm.hasModel(); }
+
+        @JavascriptInterface
+        public long modelSize() { return llm.modelSize(); }
+
+        @JavascriptInterface
+        public void downloadModel(String url) {
+            llm.download(url,
+                    (done, total) -> jsProgress(done, total),
+                    () -> jsEvent("model_ready", ""),
+                    msg -> jsEvent("model_error", msg));
+        }
+
+        @JavascriptInterface
+        public void pickModel() {
+            runOnUiThread(() -> {
+                try { modelPicker.launch(new String[]{"*/*"}); }
+                catch (Exception e) { jsEvent("model_error", "no file picker available"); }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean deleteModel() { return llm.deleteModel(); }
+
+        @JavascriptInterface
+        public void generate(String prompt) {
+            llm.generate(prompt,
+                    (text, done) -> jsCall("__jyotiLocalDelta", q(text) + "," + done),
+                    msg -> jsEvent("gen_error", msg));
+        }
     }
 }

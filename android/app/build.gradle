@@ -40,4 +40,7 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.webkit:webkit:1.11.0'
     implementation 'androidx.core:core:1.13.1'
+
+    // On-device LLM, so the Pandit chat can run with no key and no network.
+    implementation 'com.google.mediapipe:tasks-genai:0.10.27'
 }

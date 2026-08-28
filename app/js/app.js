@@ -34,12 +34,23 @@
     // keep the tail; a long history is both slow and expensive to resend
     try { localStorage.setItem(CHATKEY, JSON.stringify(state.chat.slice(-40))); } catch (e) {}
   }
+  // The on-device provider needs no key and makes no network calls, so
+  // "configured" and "online" are two different questions.
+  function aiReady() {
+    if (!state.ai.enabled) return false;
+    var p = (window.Pandit.PROVIDERS[state.ai.provider] || {});
+    return p.needsKey === false ? true : !!state.ai.key;
+  }
+  function aiUsesNetwork() {
+    return aiReady() && (window.Pandit.PROVIDERS[state.ai.provider] || {}).needsKey !== false;
+  }
   function badge() {
     var el = $('#privacyBadge');
     if (!el) return;
-    var on = state.ai.enabled && state.ai.key;
-    el.textContent = on ? '🌐 पंडित online' : '🔒 offline';
-    el.classList.toggle('online', !!on);
+    var net = aiUsesNetwork();
+    el.textContent = net ? '🌐 पंडित online'
+                         : aiReady() ? '🔒 पंडित फ़ोन में' : '🔒 offline';
+    el.classList.toggle('online', net);
   }
   function save() {
     localStorage.setItem(KEY, JSON.stringify(state.profile));
@@ -600,7 +611,7 @@
   function renderPandit() {
     var body = $('#panditBody');
 
-    if (!state.ai.enabled || !state.ai.key) {
+    if (!aiReady()) {
       body.innerHTML = gateHTML();
       wireGate();
       return;
@@ -610,7 +621,10 @@
       '<h2><span class="ic">💬</span> पंडित जी</h2>' +
       '<p class="sub" style="margin:0">आपकी अपनी कुंडली, दशा, गोचर' +
       (state.palm ? ' और हस्तरेखा' : '') + ' सामने रखकर जवाब देंगे। ' +
-      '<b style="color:var(--bl)">यह अकेला feature online है।</b></p>' +
+      (aiUsesNetwork()
+        ? '<b style="color:var(--bl)">यह अकेला feature online है।</b>'
+        : '<b style="color:var(--gr)">Model आपके फ़ोन में ही चल रहा है — कुछ बाहर नहीं जाता।</b>') +
+      '</p>' +
       '</div>';
 
     h += '<div class="chatwrap" id="chatWrap">' +
@@ -660,7 +674,7 @@
       '<div class="warn">API key आपकी अपनी होगी और सिर्फ़ इसी फ़ोन के localStorage में रहेगी। ' +
       'Request सीधे provider के पास जाती है — बीच में हमारा कोई server नहीं।</div>' +
 
-      '<div class="field"><label>API key</label>' +
+      '<div class="field" id="keyField"><label>API key</label>' +
       '<input id="aiKey" type="password" placeholder="" autocomplete="off" spellcheck="false"></div>' +
       '<p class="sub" id="keyWhere"></p>' +
       '<div id="modelBox"></div>' +
@@ -675,16 +689,44 @@
 
     function refresh() {
       var p = P[sel.value];
-      key.placeholder = p.keyHint;
+      var needsKey = p.needsKey !== false;
+      $('#keyField').hidden = !needsKey;
       $('#provNote').textContent = p.cost;
-      $('#keyWhere').innerHTML = 'key यहाँ से बनती है: <b>' + esc(p.console) + '</b>';
+      $('#keyWhere').innerHTML = needsKey
+        ? 'key यहाँ से बनती है: <b>' + esc(p.console) + '</b>' : '';
       $('#modelBox').innerHTML = '';
+      key.placeholder = p.keyHint;
+
+      if (p.id === 'local') {
+        var W = window.Pandit;
+        if (!W.localAvailable()) {
+          $('#modelBox').innerHTML = '<div class="warn">यह विकल्प सिर्फ़ Android app में चलता है, ' +
+            'browser में नहीं। APK install कीजिए।</div>';
+          $('#aiEnable').disabled = true;
+          return;
+        }
+        $('#aiEnable').disabled = false;
+        $('#modelBox').innerHTML = W.localHasModel()
+          ? '<div class="ok">Model पहले से मौजूद है (' + mb(W.localModelSize()) + ')। सीधे चालू कर सकते हैं।</div>'
+          : modelInstallHTML();
+        if (!W.localHasModel()) wireModelInstall();
+      } else {
+        $('#aiEnable').disabled = false;
+      }
     }
     sel.addEventListener('change', refresh);
     refresh();
 
     $('#aiEnable').addEventListener('click', function () {
       var k = key.value.trim(), prov = sel.value, p = P[prov];
+
+      if (p.needsKey === false) {
+        if (!window.Pandit.localHasModel())
+          return alert('पहले model install कीजिए');
+        state.ai = { provider: prov, key: '', model: 'on-device', enabled: true };
+        saveAI(); badge(); renderPandit();
+        return;
+      }
       if (!k) return alert('API key डालिए');
       if (k.indexOf(p.keyPrefix) !== 0 &&
           !confirm('यह ' + p.name + ' की key जैसी नहीं लग रही (' + p.keyHint + ' से शुरू होती है)। फिर भी आगे बढ़ें?')) return;
@@ -722,6 +764,58 @@
     if (/RESOURCE_EXHAUSTED|429/i.test(m)) return 'आज की मुफ़्त सीमा पूरी हो गई';
     if (/fetch|network|Failed to fetch/i.test(m)) return 'इंटरनेट से जुड़ नहीं पाए';
     return m;
+  }
+
+  function mb(bytes) {
+    if (!bytes) return '0 MB';
+    return (bytes / 1048576).toFixed(0) + ' MB';
+  }
+
+  function modelInstallHTML() {
+    return '<div class="note"><b>एक बार model install करना होगा</b> (लगभग 0.5–2 GB)। ' +
+      'उसके बाद हमेशा के लिए offline, बिना key, बिना बिल।<br><br>' +
+      'MediaPipe/LiteRT फ़ॉर्मैट (<code>.task</code> या <code>.litertlm</code>) की फ़ाइल चाहिए। ' +
+      'HuggingFace के <b>litert-community</b> से ऐसी फ़ाइलें मिलती हैं — link वहीं से copy कीजिए, ' +
+      'या फ़ाइल पहले download करके नीचे से चुन लीजिए।</div>' +
+      '<div class="field"><label>Model का direct download link</label>' +
+      '<input id="mdlUrl" placeholder="https://…/model.task" autocomplete="off" spellcheck="false"></div>' +
+      '<div class="btnrow"><button class="btn ghost" id="mdlDl">Download</button>' +
+      '<button class="btn ghost" id="mdlPick">फ़ाइल चुनें</button></div>' +
+      '<div id="mdlProg"></div>';
+  }
+
+  function wireModelInstall() {
+    var W = window.Pandit;
+    var prog = $('#mdlProg');
+
+    function run(opts) {
+      prog.innerHTML = '<p class="sub"><span class="spinner"></span> चल रहा है…</p>' +
+        '<div class="meter"><i id="mdlBar" style="width:0%"></i></div>';
+      W.localInstall({
+        url: opts.url,
+        onProgress: function (done, total) {
+          var bar = $('#mdlBar');
+          var pct = total > 0 ? Math.round(done / total * 100) : 0;
+          if (bar) bar.style.width = (total > 0 ? pct : 100) + '%';
+          var t = prog.querySelector('p');
+          if (t) t.innerHTML = '<span class="spinner"></span> ' + mb(done) +
+            (total > 0 ? ' / ' + mb(total) + ' (' + pct + '%)' : '');
+        }
+      }).then(function () {
+        prog.innerHTML = '<div class="ok">Model तैयार है (' + mb(W.localModelSize()) + ')। ' +
+          'अब "चालू करें" दबाइए।</div>';
+      }).catch(function (e) {
+        prog.innerHTML = '<div class="warn">नहीं हो पाया: ' + esc((e && e.message) || e) + '</div>';
+      });
+    }
+
+    $('#mdlDl').addEventListener('click', function () {
+      var u = $('#mdlUrl').value.trim();
+      if (!u) return alert('link डालिए');
+      if (!/^https:\/\//.test(u)) return alert('https:// वाला direct link चाहिए');
+      run({ url: u });
+    });
+    $('#mdlPick').addEventListener('click', function () { run({}); });
   }
 
   function wireChat() {
@@ -817,6 +911,12 @@
   // Most-specific-first chain over the SDK's typed errors — a single broad
   // catch would blur retryable failures into permanent ones.
   function friendlyErr(e) {
+    if (state.ai.provider === 'local') {
+      var m = (e && e.message) || String(e);
+      if (/no model installed/.test(m)) return 'अभी कोई model install नहीं है। "और" टैब से install कीजिए।';
+      if (/only in the Android app/.test(m)) return 'यह विकल्प सिर्फ़ Android app में चलता है।';
+      return 'फ़ोन के model से जवाब नहीं बना: ' + m;
+    }
     if (state.ai.provider === 'gemini') {
       var g = geminiErr(e);
       if (g === 'आज की मुफ़्त सीमा पूरी हो गई')
@@ -865,7 +965,7 @@
       '<button class="btn ghost" id="btnExport">रिपोर्ट सहेजें</button></div>' +
       '</div>';
 
-    var aiOn = state.ai.enabled && state.ai.key;
+    var aiOn = aiReady();
     var PV = window.Pandit.PROVIDERS;
     var cur = PV[state.ai.provider] || PV.claude;
     h += '<div class="card"><h2><span class="ic">💬</span> पंडित जी (online)</h2>' +
@@ -874,7 +974,8 @@
       (aiOn ? 'चालू' : 'बंद') + '</b></p>' +
       (aiOn ? '<div class="gridkv"><b>AI</b><span>' + esc(cur.name) + '</span>' +
         '<b>Model</b><span>' + esc(state.ai.model || window.Pandit.CLAUDE_MODEL) + '</span>' +
-        '<b>Key</b><span>' + esc(state.ai.key.slice(0, 10)) + '…' + esc(state.ai.key.slice(-4)) + '</span></div>' +
+        (state.ai.key ? '<b>Key</b><span>' + esc(state.ai.key.slice(0, 10)) + '…' +
+          esc(state.ai.key.slice(-4)) + '</span>' : '') + '</div>' +
         (state.ai.provider === 'gemini'
           ? '<div class="field mt"><label>Model बदलें</label><select id="setModel"><option value="">' +
             esc(state.ai.model) + ' (अभी चालू)</option></select>' +
@@ -894,10 +995,13 @@
     h += '<div class="card"><h2><span class="ic">🔒</span> गोपनीयता</h2>' +
       '<p>कुंडली, दशा, गोचर, पंचांग और हस्तरेखा — सारी गणना इसी device पर होती है। ' +
       'हथेली की तस्वीर कभी device से बाहर नहीं जाती, किसी भी हालत में।</p>' +
-      '<p>' + (aiOn
-        ? 'पंडित जी चालू है, इसलिए वहाँ पूछा गया सवाल और कुंडली का सार (जन्म विवरण सहित) ' +
-          'सीधे ' + esc(cur.name) + ' को जाता है। बीच में हमारा कोई server नहीं। बाक़ी सब offline ही है।'
-        : 'पंडित जी बंद है, इसलिए अभी कोई भी जानकारी इस device से बाहर नहीं जाती।') + '</p>' +
+      '<p>' + (!aiOn
+        ? 'पंडित जी बंद है, इसलिए अभी कोई भी जानकारी इस device से बाहर नहीं जाती।'
+        : !aiUsesNetwork()
+          ? 'पंडित जी फ़ोन के अपने model पर चल रहा है — सवाल और कुंडली device से बाहर नहीं जाते। ' +
+            'पूरा app अब भी offline है।'
+          : 'पंडित जी चालू है, इसलिए वहाँ पूछा गया सवाल और कुंडली का सार (जन्म विवरण सहित) ' +
+            'सीधे ' + esc(cur.name) + ' को जाता है। बीच में हमारा कोई server नहीं। बाक़ी सब offline ही है।') + '</p>' +
       '<p class="sub">कोई analytics नहीं, कोई account नहीं। सब कुछ browser के localStorage में रहता है।</p>' +
       '<div class="btnrow"><button class="btn ghost" id="btnClearPalm">हस्तरेखा डेटा मिटाएँ</button>' +
       '<button class="btn ghost" id="btnClearAll" style="color:var(--rd)">सब मिटाएँ</button></div></div>';
