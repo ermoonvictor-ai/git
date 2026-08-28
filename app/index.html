@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0a14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Jyoti — निजी ज्योतिष व हस्तरेखा</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="om">ॐ</div>
+    <div>
+      <b>Jyoti</b>
+      <small id="brandSub">निजी ज्योतिष व हस्तरेखा</small>
+    </div>
+  </div>
+  <span class="privacy" id="privacyBadge">🔒 offline</span>
+</header>
+
+<div class="app">
+
+<!-- ============ ONBOARDING ============ -->
+<section id="vSetup" class="view">
+  <div class="card">
+    <h2><span class="ic">🪔</span> जन्म विवरण</h2>
+    <p class="sub">कुंडली, दशा और गोचर — सब कुछ इसी से बनेगा। समय जितना सटीक होगा, लग्न उतना सही आएगा।</p>
+    <hr class="hr">
+    <div class="field">
+      <label>नाम</label>
+      <input id="fName" placeholder="आपका नाम" autocomplete="name">
+    </div>
+    <div class="row">
+      <div class="field"><label>जन्म तिथि</label><input id="fDate" type="date"></div>
+      <div class="field"><label>जन्म समय</label><input id="fTime" type="time" step="60"></div>
+    </div>
+    <div class="field relwrap">
+      <label>जन्म स्थान</label>
+      <input id="fPlace" placeholder="शहर खोजें — जैसे Jaipur" autocomplete="off">
+      <div id="placeList" class="suggest" hidden></div>
+    </div>
+    <details class="acc">
+      <summary>⚙️ मैन्युअल अक्षांश / देशांतर</summary>
+      <div class="body">
+        <div class="row">
+          <div class="field"><label>Latitude</label><input id="fLat" type="number" step="0.0001" placeholder="26.9124"></div>
+          <div class="field"><label>Longitude</label><input id="fLon" type="number" step="0.0001" placeholder="75.7873"></div>
+        </div>
+        <div class="field"><label>Timezone (घंटे, पूर्व +)</label><input id="fTz" type="number" step="0.25" placeholder="5.5"></div>
+        <p class="sub">भारत के लिए 5.5. जन्म के समय जो timezone लागू था वही डालें (DST वाले देशों में ध्यान दें)।</p>
+      </div>
+    </details>
+    <div class="field">
+      <label>प्रमुख हाथ (हस्तरेखा के लिए)</label>
+      <select id="fHand">
+        <option value="right">दायाँ (right) — सामान्य</option>
+        <option value="left">बायाँ (left)</option>
+      </select>
+    </div>
+    <button class="btn" id="btnSave">कुंडली बनाएँ</button>
+    <p class="sub center mt">डेटा सिर्फ़ इसी फ़ोन में सेव होगा — कोई server नहीं, कोई account नहीं।</p>
+  </div>
+</section>
+
+<!-- ============ TODAY ============ -->
+<section id="vToday" class="view">
+  <div id="todayBody"></div>
+</section>
+
+<!-- ============ KUNDLI ============ -->
+<section id="vKundli" class="view">
+  <div id="kundliBody"></div>
+</section>
+
+<!-- ============ DASHA ============ -->
+<section id="vDasha" class="view">
+  <div id="dashaBody"></div>
+</section>
+
+<!-- ============ PALM ============ -->
+<section id="vPalm" class="view">
+  <div class="card" id="palmIntro">
+    <h2><span class="ic">🖐️</span> हस्तरेखा स्कैन</h2>
+    <p class="sub">हथेली की तस्वीर सिर्फ़ आपके फ़ोन में process होती है — कहीं upload नहीं होती।</p>
+    <div class="note mt">
+      <b>बेहतर scan के लिए:</b> खिड़की की natural रौशनी में, हथेली पूरी खुली और सपाट, उँगलियाँ ऊपर,
+      पीछे सादा background, फ़ोन ~25 cm दूर। Flash से बचें — रेखाएँ धुल जाती हैं।
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="btnCam">📷 कैमरा</button>
+      <button class="btn ghost" id="btnFile">🖼️ गैलरी</button>
+    </div>
+    <input id="fileInp" type="file" accept="image/*" hidden>
+    <div class="field mt">
+      <label>कौन सा हाथ</label>
+      <select id="palmHand"><option value="right">दायाँ हाथ</option><option value="left">बायाँ हाथ</option></select>
+    </div>
+  </div>
+
+  <div class="card" id="camCard" hidden>
+    <div class="palmstage">
+      <video id="cam" playsinline muted autoplay></video>
+      <div class="guide">
+        <svg viewBox="0 0 300 400" preserveAspectRatio="none">
+          <path d="M150 25 C 96 25 62 78 62 140 L62 262 C62 330 100 372 150 372 C200 372 238 330 238 262 L238 140 C238 78 204 25 150 25 Z"
+                fill="none" stroke="#f5c451" stroke-width="2.2" stroke-dasharray="9 7" opacity=".85"/>
+          <line x1="62" y1="196" x2="238" y2="196" stroke="#f5c451" stroke-width="1" opacity=".28"/>
+          <line x1="150" y1="140" x2="150" y2="372" stroke="#f5c451" stroke-width="1" opacity=".28"/>
+        </svg>
+      </div>
+      <div class="hint">हथेली को outline में भरें · उँगलियाँ ऊपर · स्थिर रखें</div>
+    </div>
+    <div class="btnrow mt">
+      <button class="btn" id="btnShot">स्कैन करें</button>
+      <button class="btn ghost" id="btnCamClose">बंद</button>
+    </div>
+  </div>
+
+  <div id="palmBody"></div>
+</section>
+
+<!-- ============ FUSION ============ -->
+<section id="vFusion" class="view">
+  <div id="fusionBody"></div>
+</section>
+
+<!-- ============ PANDIT (online AI) ============ -->
+<section id="vPandit" class="view">
+  <div id="panditBody"></div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section id="vMore" class="view">
+  <div id="moreBody"></div>
+</section>
+
+<div class="foot">
+  Jyoti · पारंपरिक पराशरी ज्योतिष + सामुद्रिक शास्त्र<br>
+  मनन और आत्म-चिंतन के लिए · चिकित्सा, कानूनी या वित्तीय सलाह नहीं
+</div>
+</div>
+
+<nav class="tabs" id="tabs">
+  <button data-v="Today"><span class="i">☀️</span>आज</button>
+  <button data-v="Kundli"><span class="i">🔯</span>कुंडली</button>
+  <button data-v="Dasha"><span class="i">🕉️</span>दशा</button>
+  <button data-v="Palm"><span class="i">🖐️</span>हस्तरेखा</button>
+  <button data-v="Fusion"><span class="i">🔮</span>संगम</button>
+  <button data-v="Pandit"><span class="i">💬</span>पंडित</button>
+  <button data-v="More"><span class="i">⚙️</span>और</button>
+</nav>
+
+<script src="js/astro.js"></script>
+<script src="js/jyotish-data.js"></script>
+<script src="js/palm-data.js"></script>
+<script src="js/palm.js"></script>
+<script src="js/cities.js"></script>
+<script src="js/reading.js"></script>
+<script src="js/vendor/llm-sdks.js"></script>
+<script src="js/pandit.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

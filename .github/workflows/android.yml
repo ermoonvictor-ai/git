@@ -1,0 +1,99 @@
+name: Build APK
+
+# Produces a downloadable APK. Run it from the Actions tab
+# ("Build APK" -> "Run workflow"), or push a v* tag to also get a Release.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a Release under this tag (e.g. v1.0). Leave empty to only build."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name the artifact
+        id: name
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jyoti-apk-${{ steps.name.outputs.sha }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      # Release from a pushed v* tag, or from a manual run that names one.
+      # The dispatch path exists because not every environment can push tags.
+      - name: Resolve release tag
+        id: rel
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # A release asset is the only artifact with a stable, unauthenticated
+      # download URL, so give it a predictable filename:
+      #   .../releases/download/<tag>/jyoti-<tag>.apk
+      - name: Prepare release asset
+        if: steps.rel.outputs.tag != ''
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "jyoti-${{ steps.rel.outputs.tag }}.apk"
+
+      - name: Publish release
+        if: steps.rel.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          # Without this the tag is created on the default branch, so the
+          # release would point at code that did not build the attached APK.
+          target_commitish: ${{ github.sha }}
+          files: jyoti-${{ steps.rel.outputs.tag }}.apk
+          name: Jyoti ${{ steps.rel.outputs.tag }}
+          body: |
+            Vedic astrology and palm reading. Install the APK below.
+
+            It is debug-signed rather than Play-Store signed, so Android will
+            ask you to allow "install unknown apps" for whichever app you open
+            it with. Built for arm64-v8a and armeabi-v7a — every shipping
+            phone, but not the x86 emulator.
+
+            Charts, dasha, panchang, transits and palm analysis all run on the
+            device, and the palm photograph never leaves it.
+
+            The Pandit chat is opt-in and picks one of three providers:
+
+            - **On-device** — a model that runs inside the phone. No key, no
+              bill, no network. You install the model file once.
+            - **Gemini** (Google AI Studio) — has a free tier, so it costs
+              nothing to run. Needs a key you create yourself.
+            - **Claude** (Anthropic) — the best answers, pay-as-you-go.
+
+            With the on-device model, or with the chat off, the app makes no
+            network calls at all.

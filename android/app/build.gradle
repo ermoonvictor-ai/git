@@ -1,0 +1,55 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'app.jyoti'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "app.jyoti"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        // MediaPipe ships a native library per ABI. x86/x86_64 are emulator-only
+        // — no shipping Android phone uses them — and together they were half the
+        // APK, so real devices were downloading 30 MB they can never execute.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+    }
+
+    sourceSets {
+        // the web app is the single source of truth — it is not duplicated here
+        main.assets.srcDirs += ['../../app']
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // unsigned by default; CI signs it when the signing secrets are present
+        }
+    }
+
+    compileOptions {
+        // MediaPipe's tasks-genai is published as Java 21 bytecode (class file
+        // 65.0); compiling against it at 17 fails with "bad class file".
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+dependencies {
+    // Pins every Kotlin artifact to one version. Without it appcompat's
+    // kotlin-stdlib 1.8.22 collides with a transitive kotlin-stdlib-jdk8 1.6.21:
+    // the jdk7/jdk8 artifacts were folded into kotlin-stdlib in Kotlin 1.8, so
+    // the two jars declare the same classes and checkDuplicateClasses fails.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'androidx.core:core:1.13.1'
+
+    // On-device LLM, so the Pandit chat can run with no key and no network.
+    implementation 'com.google.mediapipe:tasks-genai:0.10.27'
+}
