@@ -7,6 +7,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a Release under this tag (e.g. v1.0). Leave empty to only build."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -41,19 +46,33 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      # Release from a pushed v* tag, or from a manual run that names one.
+      # The dispatch path exists because not every environment can push tags.
+      - name: Resolve release tag
+        id: rel
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       # A release asset is the only artifact with a stable, unauthenticated
       # download URL, so give it a predictable filename:
       #   .../releases/download/<tag>/jyoti-<tag>.apk
       - name: Prepare release asset
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "jyoti-${{ github.ref_name }}.apk"
+        if: steps.rel.outputs.tag != ''
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "jyoti-${{ steps.rel.outputs.tag }}.apk"
 
-      - name: Attach to release on a v* tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release
+        if: steps.rel.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          files: jyoti-${{ github.ref_name }}.apk
-          name: Jyoti ${{ github.ref_name }}
+          tag_name: ${{ steps.rel.outputs.tag }}
+          files: jyoti-${{ steps.rel.outputs.tag }}.apk
+          name: Jyoti ${{ steps.rel.outputs.tag }}
           body: |
             Offline Vedic astrology and palm reading. Install the APK below.
 

@@ -31,7 +31,8 @@ https://github.com/ermoonvictor-ai/git/releases/download/<tag>/jyoti-<tag>.apk
 ```
 
 The [Releases page](https://github.com/ermoonvictor-ai/git/releases) always lists the
-latest one.
+latest one. A release can also be cut without pushing a tag: *Actions → Build APK → Run
+workflow*, and fill in **release_tag**. The workflow creates the tag itself.
 
 **Per-commit builds:** the *Build APK* workflow also runs on every push and can be
 started by hand from the **Actions** tab (*Build APK → Run workflow*). Open the finished
