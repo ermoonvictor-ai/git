@@ -1,0 +1,27 @@
+# Reverse proxy for the Matrix homeserver + Element web client.
+# Caddy handles TLS (Let's Encrypt) automatically for both.
+
+${DOMAIN} {
+    # Matrix client/server API and media
+    handle /_matrix/* {
+        reverse_proxy synapse:8008
+    }
+    handle /_synapse/client/* {
+        reverse_proxy synapse:8008
+    }
+
+    # Everything else is the Element web client
+    handle {
+        reverse_proxy element:80
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+    }
+}
+
+# Federation is disabled (federation_domain_whitelist: [] in homeserver.yaml),
+# so there is no port 8448 listener here on purpose — this server only talks
+# to its own invited clients, never to other homeservers.
