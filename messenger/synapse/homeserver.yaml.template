@@ -1,0 +1,69 @@
+# Synapse homeserver config for a small, closed, non-federated deployment.
+# Rendered from this template by scripts/setup.sh (envsubst) into
+# synapse/data/homeserver.yaml — do not edit the rendered copy directly,
+# edit this template and re-run setup.sh instead.
+
+server_name: "${SERVER_NAME}"
+pid_file: /data/homeserver.pid
+public_baseurl: "https://${DOMAIN}/"
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: true
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    database: ${POSTGRES_DB}
+    host: db
+    port: 5432
+    cp_min: 5
+    cp_max: 10
+
+log_config: "/data/log.config"
+media_store_path: /data/media_store
+max_upload_size: 50M
+
+# --- Closed group, invite-only ---
+# No open sign-up: every account is created explicitly by an admin via
+# scripts/create-user.sh (or Synapse's register_new_matrix_user against
+# registration_shared_secret below). There is no self-serve registration
+# flow exposed to the internet.
+enable_registration: false
+registration_shared_secret: "${SYNAPSE_REGISTRATION_SHARED_SECRET}"
+
+# --- No federation ---
+# An empty whitelist means this server will not exchange traffic with any
+# other homeserver, in either direction — messages stay on this box.
+federation_domain_whitelist: []
+allow_public_rooms_over_federation: false
+allow_public_rooms_without_auth: false
+
+# Don't let anyone browse a public room directory; every room here is
+# private and invite-only by convention.
+restrict_public_rooms_to_local_users: true
+
+trusted_key_servers: []
+suppress_key_server_warning: true
+
+signing_key_path: "/data/${SERVER_NAME}.signing.key"
+
+# Rate limiting stays on (defaults) — even a closed 50-person server
+# benefits from it if a client account is ever compromised.
+
+turn_uris:
+  - "turn:${DOMAIN}:3478?transport=udp"
+  - "turn:${DOMAIN}:3478?transport=tcp"
+turn_shared_secret: "${TURN_SHARED_SECRET}"
+turn_user_lifetime: 86400000
+turn_allow_guests: false
+
+# Retention: keep it simple and unbounded by default. Tune later in
+# docs/operations.md if storage becomes a concern.
